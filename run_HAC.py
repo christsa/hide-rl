@@ -50,13 +50,13 @@ def run_HAC(FLAGS, train_env, agent, eval_env):
             # Train for an episode
             if vars(FLAGS).get('variable_env', False):
                 env.create_new_env()
-            success = agent.train(env, episode)
+            success = agent.train(env, episode, batch)
 
             if success:
                 print("Exp_num %s Batch %d, Episode %d End Goal Achieved\n" % (FLAGS.exp_num, batch, episode))
-                
-                successful_episodes += 1            
 
+                successful_episodes += 1
+                print('successful_episodes ', successful_episodes)
         # Save agent
         if FLAGS.retrain and mix_train_test and batch % TEST_FREQ == 0:
             agent.save_model(batch, successful_episodes / num_test_episodes * 100)

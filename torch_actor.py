@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from utils import layer
 from torch.nn import functional as F
 from torch import nn
 from radam import RAdam
@@ -8,6 +9,8 @@ class ActorModel(nn.Module):
 
     def __init__(self, layer_number, env, FLAGS):
         super().__init__()
+        self.actor_grads = FLAGS.actor_grads and layer_number > 0
+
         # Determine range of actor network outputs.  This will be used to configure outer layer of neural network
         if layer_number == 0:
             self.action_space_bounds = env.action_bounds
@@ -30,13 +33,22 @@ class ActorModel(nn.Module):
             self.goal_dim = env.subgoal_dim
 
         self.state_dim = env.state_dim
+        mask_global_info = FLAGS.mask_global_info
 
-        if FLAGS.mask_global_info and layer_number == 1 and FLAGS.layers == 3:
-            features_dim = self.goal_dim
-            self.features_fn = lambda states, goals: goals
-        elif FLAGS.mask_global_info and layer_number == 0:
-            features_dim = self.state_dim - 2 + self.goal_dim
-            self.features_fn = lambda states, goals: torch.cat([states[:,2:], goals], dim=-1)
+        if mask_global_info and layer_number == 1 and FLAGS.layers == 3:
+            if FLAGS.relative_subgoals:
+                features_dim = self.goal_dim
+                self.features_fn = lambda states, goals: goals
+            else:
+                features_dim = self.goal_dim + 2
+                self.features_fn = lambda states, goals: torch.cat([states[:,:2], goals], dim=-1)
+        elif mask_global_info and layer_number == 0:
+            if FLAGS.relative_subgoals:
+                features_dim = self.state_dim - 2 + self.goal_dim
+                self.features_fn = lambda states, goals: torch.cat([states[:,2:], goals], dim=-1)
+            else:
+                features_dim = self.state_dim + self.goal_dim
+                self.features_fn = lambda states, goals: torch.cat([states, goals], dim=-1)
         else:
             features_dim = self.state_dim + self.goal_dim
             self.features_fn = lambda states, goals: torch.cat([states, goals], dim=-1)
@@ -83,6 +95,8 @@ class Actor():
         self.learning_rate = learning_rate
         # self.exploration_policies = exploration_policies
         self.tau = tau
+        self.actor_grads = FLAGS.actor_grads
+        # self.batch_size = batch_size
 
         self.infer_net = ActorModel(layer_number, env, FLAGS).to(device=self.device)
 
@@ -131,9 +145,21 @@ class Actor():
         self.infer_net.load_state_dict(state_dict['infer_net'])
         self.optimizer.load_state_dict(state_dict['optimizer'])
 
-    def update(self, state, goal, action_derivs, next_batch_size, metrics):
+    def update(self, state, goal, action_derivs, next_batch_size, metrics, goal_derivs=None):
         self.optimizer.zero_grad()
-        loss = -action_derivs.mean()
+        if self.actor_grads and False:
+            assert goal_derivs is not None
+            mask = (goal_derivs < -self.time_scale+1e-6)
+            goal_derivs = goal_derivs * mask.float() / self.time_scale
+            loss = -action_derivs.mean() -goal_derivs.mean()
+        else:
+            loss = -action_derivs.mean()
         loss.backward()
         self.optimizer.step()
         metrics[self.actor_name+'/loss'] = loss.item()
+
+        # metrics[self.actor_name + "/policy_grads_mean"] = np.mean([np.mean(g) for g in policy_grad])
+        # metrics[self.actor_name + "/policy_grads_norm"] = np.mean([np.linalg.norm(g) for g in policy_grad])
+        # return len(weights)
+
+        # self.sess.run(self.update_target_weights)

@@ -23,9 +23,9 @@ def design_agent_and_env(FLAGS):
     See Section 3 of this file for other agent hyperparameters that can be configured.
     """
 
-    FLAGS.layers = 2    # Enter number of levels in agent hierarchy
+    FLAGS.layers = 3    # Enter number of levels in agent hierarchy
 
-    FLAGS.time_scale = 40    # Enter max sequence length in which each policy will specialize
+    FLAGS.time_scale = 10    # Enter max sequence length in which each policy will specialize
 
     # Enter max number of atomic actions.  This will typically be FLAGS.time_scale**(FLAGS.layers).  However, in the UR5 Reacher task, we use a shorter episode length.
 
@@ -50,11 +50,28 @@ def design_agent_and_env(FLAGS):
     # Provide file name of Mujoco model(i.e., "pendulum.xml").  Make sure file is stored in "mujoco_files" folder
     model_name = "ant_reacher.xml"
 
+    # FROM HIRO code:
+    #                     (  0    1     2   3   4   5   6     7     8     9    10    11    12    13    14)
+    # CONTEXT_RANGE_MIN = (-10, -10, -0.5, -1, -1, -1, -1, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3)
+    # CONTEXT_RANGE_MAX = ( 10,  10,  0.5,  1,  1,  1,  1,  0.5,  0.3,  0.5,  0.3,  0.5,  0.3,  0.5,  0.3)
+    normalization_dict = None if not FLAGS.normalization else {
+        'lows': OrderedDict((
+            (0, -14.),  # xpos
+            (1, -14.),  # ypos
+        )),
+        'highs': OrderedDict((
+            (0, 14.),  # xpos
+            (1, 14.),  # ypos
+        )),
+        'end_goal_dims': [0,1],
+        'subgoal_dims': [0,1],
+    }
+
     project_state_to_end_goal = lambda sim, state: state[..., :2]
     project_state_to_subgoal = lambda sim, state: state[..., :2]
-    env = EnvironmentAdapter("maze", "Ant", "MazeRandomDict", project_state_to_end_goal, project_state_to_subgoal, FLAGS.show, featurize_image=FLAGS.featurize_image)
+    env = EnvironmentAdapter("maze", "Ant", "MazeRandomDict", project_state_to_end_goal, project_state_to_subgoal, FLAGS.show, normalization_dict, featurize_image=FLAGS.featurize_image, seed=FLAGS.seed)
 
-    eval_env = EnvironmentAdapter("maze", "Ant", "MazeDict", project_state_to_end_goal, project_state_to_subgoal, FLAGS.show, featurize_image=FLAGS.featurize_image)
+    eval_env = EnvironmentAdapter("maze", "Ant", "MazeDict", project_state_to_end_goal, project_state_to_subgoal, FLAGS.show, normalization_dict, featurize_image=FLAGS.featurize_image, seed=FLAGS.seed)
 
     # To properly visualize goals, update "display_end_goal" and "display_subgoals" methods in "environment.py"
 

@@ -3,7 +3,7 @@
     "exp_num": 1,
     "num_Qs": 1,
     "oracle": false,
-    "run_command": "initialize_HAC.py --retrain --variant AntHiroMaze --exp_name HiDe_Simple_Ant --num_Qs 1 --exp_num 1 --relative_subgoals --mask_global_info --vpn --featurize_image --vpn_double_conv --Q_penalize --vpn_masking --no_attention --covariance --vpn_dqn --torch --no_middle_level",
+    "run_command": "initialize_HAC.py --retrain --variant AntHiroMaze --exp_name HiDe_Simple_Ant --num_Qs 1 --exp_num -1 --relative_subgoals --mask_global_info --vpn --featurize_image --vpn_double_conv --Q_penalize --vpn_masking --no_attention --covariance --vpn_dqn",
     "run_id": "HiDe_Simple_Ant_1_2019-09-20T13-33-16",
     "target_networks": true,
     "variant": "AntHiroMaze"

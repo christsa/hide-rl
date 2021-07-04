@@ -5,7 +5,7 @@ from mujoco_py import MjViewer
 
 class HACEnv(gym.Env):
     def __init__(self, task_id, eval_mode=False, **kwargs):
-        module = importlib.import_module(f"..{task_id}.design_agent_and_env", __name__)
+        module = importlib.import_module(".." + task_id + ".design_agent_and_env", __name__)
         self._env = env = module.design_env()
         goal_space = np.array(env.goal_space_train)
         self.metadata = {'render.subgoals' : True, 'render.modes': ['human']}

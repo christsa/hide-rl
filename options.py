@@ -69,9 +69,63 @@ def parse_options():
     )
 
     parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
+        '--all_trans',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
+        '--hind_action',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
+        '--penalty',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
+        '--prelim_HER',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
+        '--HER',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
+        '--Q_values',
+        action='store_true',
+        help='Print summary of each transition'
+    )
+
+    parser.add_argument(
         '--no_target_net',
         action='store_true',
         help='Does not use target networks.'
+    )
+
+    parser.add_argument(
+        '--negative_distance',
+        action='store_true',
+        help='The lowest layer uses negative distance instead of sparse reward.'
+    )
+
+    parser.add_argument(
+        '--dense_reward',
+        action='store_true',
+        help='The lowest layer uses dense reward and negative distance instead of sparse reward.'
     )
 
     parser.add_argument(
@@ -96,6 +150,13 @@ def parse_options():
     )
 
     parser.add_argument(
+        '--seed',
+        type=int,
+        default=0,
+        help='Experiment name.'
+    )
+
+    parser.add_argument(
         '--num_Qs',
         type=int,
         default=2,
@@ -106,6 +167,30 @@ def parse_options():
         '--oracle',
         action='store_true',
         help='Use oracle instead of the first layer.'
+    )
+
+    parser.add_argument(
+        '--bayes',
+        action='store_true',
+        help='Use Bayesian critic instead of the normal one.'
+    )
+
+    parser.add_argument(
+        '--actor_grads',
+        action='store_true',
+        help='Teach higher policies to take lower policy into account.'
+    )
+
+    parser.add_argument(
+        '--orig_trans',
+        action='store_true',
+        help='Store original transition.'
+    )
+
+    parser.add_argument(
+        '--normalization',
+        action='store_true',
+        help='Normalizes the observations from the environment.'
     )
 
     parser.add_argument(
@@ -124,6 +209,54 @@ def parse_options():
         '--mask_global_info',
         action='store_true',
         help='Mask unnecessary observations for the middle layer.'
+    )
+
+    parser.add_argument(
+        '--priority_replay',
+        action='store_true',
+        help='Uses priority replay instead of stadard replay buffer.'
+    )
+
+    parser.add_argument(
+        '--new_oracle',
+        action='store_true',
+        help='Oracle constant distance.'
+    )
+
+    parser.add_argument(
+        '--sl_oracle',
+        action='store_true',
+        help='Supervised policy by the oracle.'
+    )
+
+    parser.add_argument(
+        '--semi_oracle',
+        action='store_true',
+        help='Semisupervised policy by the oracle.'
+    )
+
+    parser.add_argument(
+        '--sac',
+        action='store_true',
+        help='Uses SoftActorCritic instead of DDPG.'
+    )
+
+    parser.add_argument(
+        '--td3',
+        action='store_true',
+        help='Uses TD3 instead of DDPG.'
+    )
+
+    parser.add_argument(
+        '--radius_learner',
+        action='store_true',
+        help='Learn radius.'
+    )
+
+    parser.add_argument(
+        '--torch',
+        action='store_true',
+        help='Use PyTorch instead of TF.'
     )
 
     parser.add_argument(
@@ -169,6 +302,12 @@ def parse_options():
     )
 
     parser.add_argument(
+        "--boost_vpn", 
+        action='store_true', 
+        help="Q targets are computed as annealing average of standard Q value (FC) and VPN value."
+    )
+
+    parser.add_argument(
         "--vpn_double_conv", 
         action='store_true', 
         help="VPN layer has double convolution."
@@ -181,9 +320,33 @@ def parse_options():
     )
 
     parser.add_argument(
+        '--vpn_post_processing',
+        action='store_true',
+        help='Apply extra conv layer after the VPN propagation.'
+    )
+
+    parser.add_argument(
         '--vpn_masking',
         action='store_true',
         help='Destill sigma from the images and apply appropriate Gaussian mask.'
+    )
+
+    parser.add_argument(
+        '--vpn_cnn_masking',
+        action='store_true',
+        help='Let the convolution apply appropriate gaussian mask on its own.'
+    )
+
+    parser.add_argument(
+        '--vpn_cnn_masking_times',
+        action='store_true',
+        help='Let the convolution apply appropriate gaussian mask and multiply the original v_map.'
+    )
+
+    parser.add_argument(
+        '--vpn_direction_masking',
+        action='store_true',
+        help='Masking using the value flow direction.'
     )
 
     parser.add_argument(
@@ -205,6 +368,12 @@ def parse_options():
     )
 
     parser.add_argument(
+        "--learn_sigma", 
+        action='store_true', 
+        help="Learn sigma using a Bandit."
+    )
+
+    parser.add_argument(
         "--sigma_overlay", 
         action='store_true', 
         help="When saving video, show attention."
@@ -223,9 +392,45 @@ def parse_options():
     )
 
     parser.add_argument(
+        "--wall_thresh", 
+        action='store_true', 
+        help="Threshold wall probabilities."
+    )
+
+    parser.add_argument(
         "--high_penalty", 
         action='store_true', 
         help="Threshold wall probabilities."
+    )
+
+    parser.add_argument(
+        "--vpn_masking_act", 
+        action='store_true', 
+        help="Use gradient passing clipping instead of sigmoid for wall probs."
+    )
+
+    parser.add_argument(
+        "--window_offset", 
+        type=int,
+        default=2,
+        help="Size of the attention window (2*offset+1) when fixed window attention is used."
+    )
+
+    parser.add_argument(
+        "--humanoid", 
+        action='store_true', 
+        help="Use pretrained humanoid as the low level agent."
+    )
+
+    parser.add_argument(
+        "--inject_her_policy", 
+        action='store_true', 
+        help="Use pretrained openai her policy."
+    )
+
+    parser.add_argument(
+        "--rrt",
+        action='store_true',
     )
 
     FLAGS, unparsed = parser.parse_known_args()

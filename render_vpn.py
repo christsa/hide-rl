@@ -41,9 +41,9 @@ module = importlib.import_module(f"variants.{FLAGS.variant}", __name__)
 if FLAGS.exp_num >= 0 or FLAGS.test:
     agent, env = module.design_agent_and_env(FLAGS)
     vpn = agent.layers[agent.FLAGS.layers-1].critic.vpn
-    current_state = torch.tensor(env.reset_sim(agent.goal_array[agent.FLAGS.layers - 1]), device=agent.device, dtype=torch.float32)
-    goal = torch.tensor(env.get_next_goal(None), dtype=torch.float32, device=agent.device)
-    current_image = torch.tensor(env.take_snapshot(), device=agent.device, dtype=torch.float32)
+    current_state = torch.tensor(env.reset_sim(agent.goal_array[agent.FLAGS.layers - 1]), device=agent.sess, dtype=torch.float32)
+    goal = torch.tensor(env.get_next_goal(None), dtype=torch.float32, device=agent.sess)
+    current_image = torch.tensor(env.take_snapshot(), device=agent.sess, dtype=torch.float32)
     position_image = env.pos_image(current_state[:2], current_image)
     current_image = torch.stack([current_image, env.pos_image(goal, current_image)], dim=0)
     r, p, v = buffer_images_v = vpn.get_info(current_image.unsqueeze(0))

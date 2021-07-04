@@ -14,7 +14,7 @@ FLAGS = parse_options()
 
 # Instantiate the agent and Mujoco environment.  The designer must assign values to the hyperparameters listed in the "design_agent_and_env.py" file. 
 # Load the variant dynamically from the variant folder based on the name.
-module = importlib.import_module(f"variants.{FLAGS.variant}", __name__)
+module = importlib.import_module("variants."+ FLAGS.variant, __name__)
 
 def get_agent_and_envs(FLAGS):
     agent, env = module.design_agent_and_env(FLAGS)

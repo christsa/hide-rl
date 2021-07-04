@@ -29,10 +29,12 @@ class ExperienceBuffer():
             'goals': torch.zeros(max_buffer_size, self.goal_dim, dtype=torch.float32, device=self.device),
             'terminals': torch.zeros(max_buffer_size, dtype=torch.float32, device=self.device),
         }
+        if FLAGS.sl_oracle and layer_number == FLAGS.layers-1:
+            self.fields['action_labels'] = torch.zeros(max_buffer_size, self.action_dim, dtype=torch.float32, device=self.device)
         self.vpn = FLAGS.vpn and layer_number == FLAGS.layers-1
 
     def add(self, experience):
-        assert len(experience) == 8, 'Experience must be of form (s, a, r, s, g, t, hindsight, images\')'
+        assert len(experience) == 9, 'Experience must be of form (s, a, r, s, g, t, hindsight, action_labels, images\')'
         assert type(experience[5]) == bool
 
         if self.size < self.max_buffer_size:
@@ -51,10 +53,12 @@ class ExperienceBuffer():
         self.fields['next_states'][id] = experience[3]
         self.fields['goals'][id] = experience[4]
         self.fields['terminals'][id] = experience[5]
+        if self.action_labels:
+            self.fields['action_labels'][id] = experience[7]
         if self.vpn:
             if 'images' not in self.fields:
-                self.fields['images'] = torch.zeros(self.max_buffer_size, experience[7].shape[0], experience[7].shape[1], experience[7].shape[2], dtype=torch.float32, device=self.device)
-            self.fields['images'][id] = experience[7]
+                self.fields['images'] = torch.zeros(self.max_buffer_size, experience[8].shape[0], experience[8].shape[1], experience[8].shape[2], dtype=torch.float32, device=self.device)
+            self.fields['images'][id] = experience[8]
 
     def get_batch(self):
         dist = np.random.randint(0, high=self.size, size=min(self.size, self.batch_size))
@@ -70,11 +74,15 @@ class ExperienceBuffer():
         next_states = self.fields['next_states'][idxes]
         goals = self.fields['goals'][idxes]
         terminals = self.fields['terminals'][idxes]
+        if self.action_labels:
+            action_labels = self.fields['action_labels'][idxes]
+        else:
+            action_labels = None
         if self.vpn:
             images = self.fields['images'][idxes]
         else:
             images = None
-        return (states, actions, rewards, next_states, goals, terminals, images)
+        return (states, actions, rewards, next_states, goals, terminals, action_labels, images)
 
     def batch_update(self, *args, **kwargs):
         pass

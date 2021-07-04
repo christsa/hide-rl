@@ -26,6 +26,7 @@ import random
 from . import maze_env_utils
 
 # Directory that contains mujoco xml files.
+# MODEL_DIR = '/home/lukas/miniconda3/envs/tamer/lib/python3.6/site-packages/gym/envs/mujoco/assets/'
 MODULE_DIR, _ = os.path.split(os.path.realpath(__file__))
 MODEL_DIR = os.path.join(MODULE_DIR, 'assets/')
 GATE_HEIGHT = 50
@@ -60,6 +61,7 @@ class MazeEnv(gym.Env):
         extra_dims=False,
         key_gate_passage=False,
         maze_structure=None,
+        seed=0,
         *args,
         **kwargs):
         self._maze_id = maze_id
@@ -355,10 +357,8 @@ class MazeEnv(gym.Env):
         file_handle, file_path = tempfile.mkstemp(text=True, suffix='.xml')
         tree.write(file_path)
 
-        # first_passage_goal = (self.passage[0] - 0.5 * size_scaling, self.passage[1] + ((self._passage_wall_width+self._passage_width)/2) * size_scaling )
-        # second_passage_goal = (self.passage[0], self.passage[1] + ((self._passage_wall_width+self._passage_width)/2) * size_scaling )
-        # third_passage_goal = (self.passage[0] + 0.5 * size_scaling, self.passage[1] + ((self._passage_wall_width+self._passage_width)/2) * size_scaling )
         self.wrapped_env = model_cls(*args, file_path=file_path, **kwargs)
+        self.wrapped_env.seed(seed)
         os.close(file_handle)
         os.remove(file_path)
 

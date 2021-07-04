@@ -1,14 +1,17 @@
 import torch
 import numpy as np
+from utils import layer
 from torch.nn import functional as F
 from torch import nn
 from radam import RAdam
 import utils
+from bandit.bandit import Bandit
 
 class ActorModel(nn.Module):
 
     def __init__(self, layer_number, env, FLAGS):
         super().__init__()
+        self.actor_grads = FLAGS.actor_grads and layer_number > 0
 
         # Determine range of actor network outputs.  This will be used to configure outer layer of neural network
         # Determine symmetric range of subgoal space and offset
@@ -19,7 +22,7 @@ class ActorModel(nn.Module):
         self.no_attention = FLAGS.no_attention
 
         self.actor_name = 'actor_' + str(layer_number)
-        self.offset = 2
+        self.offset = FLAGS.window_offset
         self.vpn_dqn = FLAGS.vpn_dqn
 
     def forward(self, v_image, pos_coords, sigma=None, pixel_probs=False):
@@ -67,6 +70,7 @@ class Actor():
         self.time_scale = FLAGS.time_scale
         # self.exploration_policies = exploration_policies
         self.tau = tau
+        self.actor_grads = FLAGS.actor_grads
         self.sigma_val = 2. if FLAGS.gaussian_attention else None
         self.vpn_masking = FLAGS.vpn_masking
         # self.batch_size = batch_size
@@ -77,12 +81,18 @@ class Actor():
         # Create target actor network
         self.target_net = self.infer_net
 
+        self.bandit = Bandit(env, FLAGS, self.device) if FLAGS.learn_sigma and FLAGS.gaussian_attention else None
+
         self.get_pos_image = lambda states, images: env.pos_image(states[..., :2], images[:, 0])
         self.get_image_location = lambda states, images: torch.stack(env.get_image_position(states[..., :2], images), dim=-1)
         self.get_env_location = lambda states, images: torch.stack(env.get_env_position(states[..., :2], images), dim=-1)
     
     def sigma(self, vpn_values, state, image):
-        return self.sigma_val
+        if self.bandit is None:
+            return self.sigma_val
+        else:
+            pos_image = self.get_pos_image(state, image)
+            return self.bandit.get_range(vpn_values, pos_image)
 
     def _action(self, net, state, image):
         pos_image = self.get_pos_image(state, image)
@@ -120,11 +130,17 @@ class Actor():
             target.data.copy_(self.tau * source + (1.0 - self.tau) * target)
 
     def state_dict(self):
-        return {}
+        return {'bandit':self.bandit.state_dict()} if self.bandit is not None else {}
         
     def load_state_dict(self, state_dict):
-        assert len(state_dict) == 0
+        if self.bandit is not None:
+            self.bandit.load_state_dict(state_dict['bandit'])
+
+    def update(self, state, goal, action_derivs, next_batch_size, metrics, goal_derivs=None):
         pass
 
-    def update(self, state, goal, action_derivs, next_batch_size, metrics):
-        pass
+        # metrics[self.actor_name + "/policy_grads_mean"] = np.mean([np.mean(g) for g in policy_grad])
+        # metrics[self.actor_name + "/policy_grads_norm"] = np.mean([np.linalg.norm(g) for g in policy_grad])
+        # return len(weights)
+
+        # self.sess.run(self.update_target_weights)

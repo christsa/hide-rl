@@ -2,15 +2,18 @@ from torch.nn import functional as F
 from torch import nn
 import torch
 import numpy as np
+from utils import layer
 from radam import RAdam
 
 class CriticModel(nn.Module):
     def __init__(self, env, layer_number, FLAGS):
         super().__init__()
-        self.q_limit = -FLAGS.time_scale
-        # Set parameters to give critic optimistic initialization near q_init
-        self.q_init = -0.067
-        self.q_offset = -np.log(self.q_limit/self.q_init - 1)
+        self.negative_distance = FLAGS.negative_distance
+        if not self.negative_distance:
+            self.q_limit = -FLAGS.time_scale
+            # Set parameters to give critic optimistic initialization near q_init
+            self.q_init = -0.067
+            self.q_offset = -np.log(self.q_limit/self.q_init - 1)
         self.no_target_net = FLAGS.no_target_net
 
         # Dimensions of goal placeholder will differ depending on layer level
@@ -28,12 +31,22 @@ class CriticModel(nn.Module):
         else:
             action_dim = env.subgoal_dim
 
-        if FLAGS.mask_global_info and layer_number == 1 and FLAGS.layers == 3:
-            self.features_dim = self.goal_dim + action_dim
-            self.features_fn = lambda states, goals, actions: torch.cat([goals, actions], dim=-1)
-        elif FLAGS.mask_global_info and layer_number == 0:
-            self.features_dim = self.state_dim + self.goal_dim + action_dim - 2
-            self.features_fn = lambda states, goals, actions: torch.cat([states[:, 2:], goals, actions], dim=-1)
+        mask_global_info = FLAGS.mask_global_info
+
+        if mask_global_info and layer_number == 1 and FLAGS.layers == 3:
+            if FLAGS.relative_subgoals:
+                self.features_dim = self.goal_dim + action_dim
+                self.features_fn = lambda states, goals, actions: torch.cat([goals, actions], dim=-1)
+            else:
+                self.features_dim = self.goal_dim + action_dim + 2
+                self.features_fn = lambda states, goals, actions: torch.cat([states[:,:2], goals, actions], dim=-1)
+        elif mask_global_info and layer_number == 0:
+            if FLAGS.relative_subgoals:
+                self.features_dim = self.state_dim + self.goal_dim + action_dim - 2
+                self.features_fn = lambda states, goals, actions: torch.cat([states[:, 2:], goals, actions], dim=-1)
+            else:
+                self.features_dim = self.state_dim + self.goal_dim + action_dim
+                self.features_fn = lambda states, goals, actions: torch.cat([states, goals, actions], dim=-1)
         else:
             self.features_dim = self.state_dim + self.goal_dim + action_dim
             self.features_fn = lambda states, goals, actions: torch.cat([states, goals, actions], dim=-1)
@@ -60,22 +73,29 @@ class CriticModel(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         x = self.fc4(x)
-        # A q_offset is used to give the critic function an optimistic initialization near 0
-        return torch.sigmoid(x + self.q_offset) * self.q_limit
+        if self.negative_distance:
+            return x
+        else:
+            # A q_offset is used to give the critic function an optimistic initialization near 0
+            return torch.sigmoid(x + self.q_offset) * self.q_limit
 
 class Critic():
 
     def __init__(self, device, env, layer_number, FLAGS, vpn=None, learning_rate=0.001, gamma=0.98, tau=0.05):
-        self.device = device
+        self.device = device # Session in its TF equivalent
         self.critic_name = 'critic_' + str(layer_number)
         self.learning_rate = learning_rate
         self.gamma = gamma
         self.tau = tau
+        self.sac = FLAGS.sac
+        self.td3 = FLAGS.td3
         self.time_scale = FLAGS.time_scale
-        self.q_limit = -FLAGS.time_scale
-        # Set parameters to give critic optimistic initialization near q_init
-        self.q_init = -0.067
-        self.q_offset = -np.log(self.q_limit/self.q_init - 1)
+        self.negative_distance = FLAGS.negative_distance
+        if not self.negative_distance:
+            self.q_limit = -FLAGS.time_scale
+            # Set parameters to give critic optimistic initialization near q_init
+            self.q_init = -0.067
+            self.q_offset = -np.log(self.q_limit/self.q_init - 1)
         self.no_target_net = FLAGS.no_target_net
         # Create critic network graph
         self.infer_nets = [CriticModel(env, layer_number, FLAGS).to(device=self.device) for i in range(FLAGS.num_Qs)]
@@ -107,18 +127,32 @@ class Critic():
         with torch.no_grad():
             wanted_qs = torch.stack([net(new_states, new_goals, new_actions) for net in self.target_nets], dim=0)
             wanted_qs = torch.min(wanted_qs, dim=0)[0].detach().squeeze()
+       
 
+        # for i in range(len(wanted_qs)):
+        #     if is_terminals[i]:
+        #         wanted_qs[i] = rewards[i]
+        #     else:
+        #         wanted_qs[i] = rewards[i] + self.gamma * wanted_qs[i]
+        #     if next_entropy is not None:
+        #         wanted_qs[i] = wanted_qs[i] - next_entropy[i]
+
+        #     # Ensure Q target is within bounds [-self.time_limit,0]
+        #     if not (self.negative_distance or self.sac):
+        #         wanted_qs[i] = max(min(wanted_qs[i],0), self.q_limit)
+        #         assert wanted_qs[i] <= 0 and wanted_qs[i] >= self.q_limit, "Q-Value target not within proper bounds"
         wanted_qs = rewards + (1 - is_terminals) * (self.gamma * wanted_qs)
-        if next_entropy is not None: # residual from SAC implementation
+        if next_entropy is not None:
             wanted_qs -= next_entropy
-        wanted_qs = torch.clamp(wanted_qs, max=0, min=self.q_limit)
+        if not (self.negative_distance or self.sac):
+            wanted_qs = torch.clamp(wanted_qs, max=0, min=self.q_limit)
         wanted_qs = wanted_qs.unsqueeze(-1)
 
         infered_Qs = [net(old_states, old_goals, old_actions) for net in self.infer_nets]
         infered_Qs_min = torch.min(torch.stack(infered_Qs, dim=0), dim=0)[0]
         if is_weights is None:
             is_weights = torch.ones_like(wanted_qs)
-        abs_errors = torch.abs(wanted_qs - infered_Qs[0]).detach()
+        abs_errors = torch.abs(wanted_qs - (infered_Qs_min if (self.sac or self.td3) else infered_Qs[0])).detach()
         self.loss_val = 0
         for i, infered_q in enumerate(infered_Qs):
             self.optimizers[i].zero_grad()
@@ -135,13 +169,13 @@ class Critic():
     def get_gradients_for_actions(self, state, goal, actor, images):
         action = actor.get_action(state, goal, images, symbolic=True)
         Q_s = torch.stack([net(state, goal, action) for net in self.infer_nets], dim=0)
-        Q = Q_s[0]
+        Q = torch.min(Q_s, dim=0)[0] if self.sac else Q_s[0]
         # We are not returning gradients, but the actor expects it.
         return Q
 
     def get_gradients_for_goals(self, state, goal, action):
         Q_s = torch.stack([net(state, goal, action) for net in self.infer_nets], dim=0)
-        Q = Q_s[0]
+        Q = torch.min(Q_s, dim=0)[0] if self.sac else Q_s[0]
         # We are not returning gradient, but the actor expects it.
         return Q
 

@@ -1,14 +1,18 @@
+# from tkinter import *
+# from tkinter import ttk
 import time
 import numpy as np
 from sl_envs.hac.hac_env import HACEnv
+# from sl_envs.reacher.reacher import ReacherEnv
 from sl_envs.lj.create_maze_env import create_maze_env
+# from sl_envs.fetch import create_maze as create_fetch_maze
 from mujoco_py import load_model_from_path, MjSim, MjViewer
 from map import generate_random_map
 import pickle
 
 class EnvironmentAdapter():
 
-    def __init__(self, universe, domain, task, project_state_to_end_goal, project_state_to_subgoal, show = False, featurize_image=False):
+    def __init__(self, universe, domain, task, project_state_to_end_goal, project_state_to_subgoal, show = False, normalization_dict=None, featurize_image=False, seed=0):
         self.task = task
         self.universe = universe
         self.domain = domain
@@ -17,27 +21,42 @@ class EnvironmentAdapter():
         if universe == "HAC":
             assert domain == "Ant"
             self._env = env = HACEnv(task)
+        elif universe == "reacher":
+            #assert domain == "reacher"
+            self._env = env = ReacherEnv()
         elif universe == "maze":
             assert domain in ["Ant", "Point", "Humanoid", "DMPoint"]
             if task == 'KeyGateHACDict':
                 task = 'KeyGateDict'
-                self._env = env = create_maze_env(domain+task, hac_mode=True, extra_dims=True)
+                self._env = env = create_maze_env(domain+task, seed=seed, hac_mode=True, extra_dims=True)
             elif task in ['CustomDict']:
                 self.maze_counter = 0
-                self.mazes = pickle.load(open('RandomMazes_07_5.pkl', 'rb'))
+                self.mazes = pickle.load(open('RandomMazes.pkl', 'rb'))
                 self.task = task = 'CustomDict'
                 self._env = env = self.create_new_env()
             else:
-                self._env = env = create_maze_env(domain+task, hac_mode=True)
+                self._env = env = create_maze_env(domain+task, seed=seed, hac_mode=True)
             print("Subgoal space: ", env.subgoal_space.low, env.subgoal_space.high)
             self.env_len_x = (self._env.MAZE_SIZE_SCALING * len(self._env.MAZE_STRUCTURE[0]))
             self.env_len_y = (self._env.MAZE_SIZE_SCALING * len(self._env.MAZE_STRUCTURE))
+        elif universe == "fetch":
+            import gym
+            assert domain in ["push", "ball"]
+            if "random" in task:
+                self.maze_counter = 0
+                self.mazes = pickle.load(open('RandomMazesNoFence_08.pkl', 'rb'))
+                self.task = task = 'CustomDict'
+                self._env = env = self.create_new_env()
+            else:
+                self._env = env = create_fetch_maze(domain, task)
+
 
         if universe == "HAC":
             self.name = env._env.name
         else:
             self.name = domain+task
 
+        self.normalization_dict = normalization_dict
         # Set dimensions and ranges of states, actions, and goals in order to configure actor/critic networks
         self.state_dim = env.observation_space.spaces['observation'].shape[0]
         self.action_dim = env.action_space.shape[0] # low-level action dim
@@ -45,7 +64,7 @@ class EnvironmentAdapter():
         self.action_offset = np.zeros((len(self.action_bounds))) # Assumes symmetric low-level action ranges
         self.end_goal_dim = env.observation_space.spaces['desired_goal'].shape[0]
         self.subgoal_dim = env.subgoal_space.shape[0]
-        self.subgoal_bounds = list(zip(env.subgoal_space.low, env.subgoal_space.high))
+        self.subgoal_bounds = list(zip(self._normalize_subgoal_list(env.subgoal_space.low), self._normalize_subgoal_list(env.subgoal_space.high)))
 
         # Projection functions
         self.project_state_to_end_goal = project_state_to_end_goal 
@@ -63,16 +82,22 @@ class EnvironmentAdapter():
 
 
         # End goal/subgoal thresholds
-        self.end_goal_thresholds = [1.0] * self.end_goal_dim
-        self.subgoal_thresholds = [0.5] * self.subgoal_dim
+        if self.universe == 'fetch':
+            self.end_goal_thresholds = self._normalize_end_goal_list([0.035] * self.end_goal_dim)
+            self.subgoal_thresholds = self._normalize_subgoal_list([0.035] * self.subgoal_dim)
+        elif self.universe == 'reacher':
+            self.end_goal_thresholds = self._normalize_end_goal_list([0.05] * self.end_goal_dim)
+            self.subgoal_thresholds = self._normalize_subgoal_list([0.05] * self.subgoal_dim)
+        else:
+            self.end_goal_thresholds = self._normalize_end_goal_list([1.0] * self.end_goal_dim)
+            self.subgoal_thresholds = self._normalize_subgoal_list([0.5] * self.subgoal_dim)
 
-        # Set inital state and goal state spaces
-        # LJ: self.initial_state_space = initial_state_space
-        # self.goal_space_train = goal_space_train
-        # self.goal_space_test = goal_space_test
-        # self.subgoal_colors = ["Magenta","Green","Red","Blue","Cyan","Orange","Maroon","Gray","White","Black"]
-
-        self.max_actions = 800 if ("KeyGate" in task or "Wall" in task)  else 500
+        if ("KeyGate" in task or "Wall" in task):
+            self.max_actions = 1000
+        elif self.universe == 'fetch':
+            self.max_actions = 500
+        else:
+            self.max_actions = 500
 
         # Implement visualization if necessary
         self.visualize = show  # Visualization boolean
@@ -86,14 +111,32 @@ class EnvironmentAdapter():
         self.map = self.mazes['mazes'][self.maze_counter]
         print("Maze distance: ", self.mazes['distances'][self.maze_counter])
         self.maze_counter += 1
-        self._env = env = create_maze_env(self.domain+self.task, hac_mode=True, maze_structure=self.map)
+        if self.universe == 'fetch':
+            self._env = env = create_fetch_maze(self.domain, self.task, maze_structure=self.map)
+        else:
+            self._env = env = create_maze_env(self.domain+self.task, hac_mode=True, maze_structure=self.map)
         self._current_obs = None
         self._subgoals = None
         return self._env
 
+    def get_obstacle_list(self):
+        obstacles = []
+        #self.map = self.map[::-1]
+        start = []
+        goal = []
+        for i in range(len(self.map)):
+            for j in range(len(self.map[0])):
+                if self.map[i][j] == 1:
+                    obstacles.append((j*self._env.MAZE_SIZE_SCALING,i*self._env.MAZE_SIZE_SCALING,self._env.MAZE_SIZE_SCALING))
+                elif self.map[i][j] == 'r':
+                    start = [j*self._env.MAZE_SIZE_SCALING+self._env.MAZE_SIZE_SCALING/2,i*self._env.MAZE_SIZE_SCALING+self._env.MAZE_SIZE_SCALING/2]
+                elif self.map[i][j] == '+':
+                    goal = [j*self._env.MAZE_SIZE_SCALING+self._env.MAZE_SIZE_SCALING/2,i*self._env.MAZE_SIZE_SCALING+self._env.MAZE_SIZE_SCALING/2]
+        return obstacles, start, goal
     # Get state, which concatenates joint positions and velocities
     def get_state(self):
-        return self._current_obs['observation']
+
+        return self._normalize_observation(self._current_obs['observation'])
 
     @property
     def image_size(self):
@@ -102,6 +145,12 @@ class EnvironmentAdapter():
             self.reset_sim(None)
             self._img_size = self.take_snapshot().shape
         return self._img_size
+
+    @property
+    def healthy(self):
+        if self.universe == 'fetch':
+            return self._env.is_pos_valid(self._env._get_obs()['achieved_goal'])
+        return True
 
     # Reset simulation to state within initial state specified by user
     def reset_sim(self, test):
@@ -115,11 +164,11 @@ class EnvironmentAdapter():
 
         self._current_obs, reward, done, info = self._env.step(action)
         if self.visualize:
-            self._env.render(subgoals=self._subgoals)
+            self._env.render(subgoals=self._subgoals, mode='human')
 
         return self.get_state()
 
-    def render(self, mode='rgb_array'):
+    def render(self, subgoals=None, mode='rgb_array'):
         return self._env.render(mode=mode, subgoals=self._subgoals, width=1000, height=1000)
 
     @property
@@ -134,7 +183,8 @@ class EnvironmentAdapter():
     # Function returns an end goal
     def get_next_goal(self,test):
         # self.reset_sim()
-        end_goal = self._current_obs['desired_goal']
+        end_goal = self._normalize_end_goal_list(self._current_obs['desired_goal'])
+
         return end_goal
 
     def crop_raw(self, image):
@@ -173,6 +223,7 @@ class EnvironmentAdapter():
         return image
 
     def take_snapshot(self):
+        if self.universe == 'fetch': return self._env.take_snapshot()
         def preprocess_image(image):
             # from scipy import ndimage
             image = self.crop_raw(image)
@@ -202,6 +253,7 @@ class EnvironmentAdapter():
             return preprocess_image(image)
 
     def get_image_position(self, pos, image):
+        if self.universe == "fetch": return self._env.get_image_position(pos, image)
         len_x = (self._env.MAZE_SIZE_SCALING * len(self._env.MAZE_STRUCTURE[0]))
         len_y = (self._env.MAZE_SIZE_SCALING * len(self._env.MAZE_STRUCTURE))
         # x_scale = image.shape[-1] / len_x
@@ -217,6 +269,7 @@ class EnvironmentAdapter():
         return im_pos_x, im_pos_y
 
     def get_env_position(self, pos, image):
+        if self.universe == "fetch": return self._env.get_env_position(pos, image)
         len_x = (self._env.MAZE_SIZE_SCALING * len(self._env.MAZE_STRUCTURE[0]))
         len_y = (self._env.MAZE_SIZE_SCALING * len(self._env.MAZE_STRUCTURE))
 
@@ -231,6 +284,7 @@ class EnvironmentAdapter():
         return env_pos_x, env_pos_y
 
     def pos_image(self, goal, image, offset=0, color=1.0):
+        if self.universe == "fetch": return self._env.pos_image(goal, image, color)
         assert len(image.shape) in [2, 3], image.shape
         # Make a copy of the image.
         if hasattr(image, 'clone'):
@@ -269,15 +323,15 @@ class EnvironmentAdapter():
             if (i == FLAGS.layers -2 and FLAGS.oracle):
                 if FLAGS.relative_subgoals:
                     pos = self.project_state_to_end_goal(None, self.get_state())
-                    self._subgoals[i] = subgoal + pos
+                    self._subgoals[i] = self._denormalize_end_goal_list(subgoal + pos)
                 else:
-                    self._subgoals[i] = subgoal
+                    self._subgoals[i] = self._denormalize_end_goal_list(subgoal)
             else:
                 if FLAGS.relative_subgoals:
                     pos = self.project_state_to_subgoal(None, self.get_state())
-                    self._subgoals[i] = subgoal + pos
+                    self._subgoals[i] = self._denormalize_subgoal_list(subgoal + pos)
                 else:
-                    self._subgoals[i] = subgoal
+                    self._subgoals[i] = self._denormalize_subgoal_list(subgoal)
     
     def _unscale(self, number, low, high):
         assert (low is None) == (high is None)
@@ -289,4 +343,52 @@ class EnvironmentAdapter():
         assert (low is None) == (high is None)
         if low is None:
             return number
-        return np.clip(low + (number + 1.) * (high - low) / 2.0, low, high)        
+        return np.clip(low + (number + 1.) * (high - low) / 2.0, low, high)
+
+    def _unscale_list(self, lst, indices, dims):
+        new_lst = lst.copy()
+        for i, dim in zip(indices, dims):
+            low = self.normalization_dict['lows'][dim]
+            high = self.normalization_dict['highs'][dim]
+            new_lst[i] = self._unscale(lst[i], low, high)
+        return new_lst
+
+    def _scale_list(self, lst, indices, dims):
+        new_lst = lst.copy()
+        for i, dim in zip(indices, dims):
+            low = self.normalization_dict['lows'][dim]
+            high = self.normalization_dict['highs'][dim]
+            new_lst[i] = self._scale(lst[i], low, high)
+        return new_lst
+
+    def _normalize_end_goal_list(self, end_goal_list):
+        if self.normalization_dict is None:
+            return end_goal_list
+        dims = self.normalization_dict['end_goal_dims']
+        return self._unscale_list(end_goal_list, range(len(dims)), dims)
+        
+    def _normalize_subgoal_list(self, subgoal_list):
+        if self.normalization_dict is None:
+            return subgoal_list
+        dims = self.normalization_dict['subgoal_dims']
+        return self._unscale_list(subgoal_list, range(len(dims)), dims)
+
+    def _normalize_observation(self, observation):
+        if self.normalization_dict is None:
+            return observation
+        dims = list(self.normalization_dict['lows'].keys())
+        return self._unscale_list(observation, dims, dims)
+    
+    def _denormalize_subgoal_list(self, subgoal_list):
+        if self.normalization_dict is None:
+            return subgoal_list
+        dims = self.normalization_dict['subgoal_dims']        
+        return self._scale_list(subgoal_list, range(len(dims)), dims)
+
+    def _denormalize_end_goal_list(self, end_goal_list):
+        if self.normalization_dict is None:
+            return end_goal_list
+        dims = self.normalization_dict['end_goal_dims']        
+        return self._scale_list(end_goal_list, range(len(dims)), dims)
+        
+        

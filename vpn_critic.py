@@ -2,8 +2,9 @@ from torch.nn import functional as F
 from torch import nn
 import torch
 import numpy as np
+from utils import layer
 from radam import RAdam
-from vpn import MVProp, VIN
+from vpn import MVProp
 import utils
 from torch_critic import Critic as ClassicCritic
 
@@ -20,7 +21,7 @@ class CriticModel(nn.Module):
         self.gaussian_attention = FLAGS.gaussian_attention
         self.covariance = FLAGS.covariance
 
-        self.offset = 2
+        self.offset = FLAGS.window_offset
 
         # Dimensions of goal placeholder will differ depending on layer level
         if layer_number == FLAGS.layers - 1 or (layer_number == FLAGS.layers -2 and FLAGS.oracle):
@@ -70,19 +71,24 @@ class CriticModel(nn.Module):
 class Critic():
 
     def __init__(self, device, env, layer_number, FLAGS, learning_rate=0.001, gamma=0.98, tau=0.05):
-        self.device = device
+        self.device = device # Session in its TF equivalent
         self.critic_name = 'vpn_critic_' + str(layer_number)
         self.learning_rate = learning_rate
         self.q_limit = -FLAGS.time_scale
         self.gamma = gamma
         self.tau = tau
+        self.sac = FLAGS.sac
+        self.td3 = FLAGS.td3
         self.vpn = MVProp(self.gamma, FLAGS, env).to(self.device)
         self.no_target_net = FLAGS.no_target_net
-        self.high_penalty = FLAGS.high_penalty
         # Create critic network graph
         self.infer_net = CriticModel(env, layer_number, FLAGS).to(device=self.device)
         self.no_weights = FLAGS.no_vpn_weights
         self.vpn_masking = FLAGS.vpn_masking
+
+        self.classic_critic = None
+        if FLAGS.boost_vpn:
+            self.classic_critic =  ClassicCritic(device, env, layer_number, FLAGS, learning_rate, gamma, tau)
 
         if not self.no_weights:
             opt_class = RAdam if FLAGS.radam else torch.optim.Adam
@@ -128,14 +134,21 @@ class Critic():
     def update(self, old_states, old_actions, rewards, new_states, old_goals, new_goals, new_actions, is_terminals, is_weights, next_entropy, images, metrics, total_steps_taken=None):
         if self.no_weights:
             return torch.ones_like(rewards)
+        if self.classic_critic is not None:
+            self.classic_critic.update(old_states, old_actions, rewards, new_states, old_goals, new_actions, is_terminals, is_weights, next_entropy, None, metrics)
+
         with torch.no_grad():
             wanted_qs = self._value(self.target_net, self.vpn_target, images, new_states, new_actions)
+            if self.classic_critic is not None:
+                alpha = 1 - (min(total_steps_taken, 1e-6) / 1e-6)
+                wanted_qs_classic = torch.stack([net(new_states, new_goals, new_actions) for net in self.classic_critic.target_nets], dim=0)
+                wanted_qs_classic = torch.min(wanted_qs_classic, dim=0)[0].detach().squeeze()
+                alpha*(wanted_qs_classic) + (1-alpha)*wanted_qs
        
         wanted_qs = rewards + (1 - is_terminals) * (self.gamma * wanted_qs)
         if next_entropy is not None:
             wanted_qs -= next_entropy
-        if not self.high_penalty:
-            wanted_qs = torch.clamp(wanted_qs, max=0, min=self.q_limit)
+        wanted_qs = torch.clamp(wanted_qs, max=0, min=self.q_limit)
 
         infered_Qs, extra_loss = self._value(self.infer_net, self.vpn, images, old_states, old_actions, get_extra_loss=True)
         if is_weights is None:
@@ -147,8 +160,6 @@ class Critic():
         loss.backward()
         self.optimizer.step()
         
-        if isinstance(extra_loss, torch.Tensor):
-            metrics[self.critic_name + '/extra_loss'] = extra_loss.item()
         metrics[self.critic_name + '/Q_loss'] = loss.item()
         metrics[self.critic_name + '/Q_val'] = torch.mean(wanted_qs).item()
         return abs_errors

@@ -1,7 +1,32 @@
+#import tensorflow as tf
 import torch
 import numpy as np
 import os
 import math
+
+def layer(input_layer, num_next_neurons, is_output=False):
+    num_prev_neurons = int(input_layer.shape[1])
+    shape = [num_prev_neurons, num_next_neurons]
+    
+    if is_output:
+        weight_init = tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3)
+        bias_init = tf.random_uniform_initializer(minval=-3e-3, maxval=3e-3)
+    else:
+        # 1/sqrt(f)
+        fan_in_init = 1 / num_prev_neurons ** 0.5
+        weight_init = tf.random_uniform_initializer(minval=-fan_in_init, maxval=fan_in_init)
+        bias_init = tf.random_uniform_initializer(minval=-fan_in_init, maxval=fan_in_init) 
+
+    weights = tf.get_variable("weights", shape, initializer=weight_init)
+    biases = tf.get_variable("biases", [num_next_neurons], initializer=bias_init)
+
+    dot = tf.matmul(input_layer, weights) + biases
+
+    if is_output:
+        return dot
+
+    relu = tf.nn.relu(dot)
+    return relu
 
 def attention(v, pos, offset):
     # V has shape: [batch_size, img_size, img_size]
@@ -135,7 +160,7 @@ def argmax(value_grid, x_coords, y_coords):
 
 def render_image_for_video(env, FLAGS, agent, state):
     def to_torch(value):
-        return torch.tensor(value, dtype=torch.float32, device=agent.device)
+        return torch.tensor(value, dtype=torch.float32, device=agent.sess)
     real_image = env.crop_raw(env.render(mode='rgb_array'))
     if FLAGS.vpn and FLAGS.vpn_masking and FLAGS.sigma_overlay:
         vpn = agent.layers[-1].critic.vpn
@@ -155,7 +180,8 @@ def render_image_for_video(env, FLAGS, agent, state):
             kernel = vpn.mask_image(v_map, p, video_pos_image, video_image_position, return_kernel=True)
             kernel = torch.where(kernel < 0.01, torch.ones_like(kernel)*0.8, kernel)
             overlay = kernel.squeeze().cpu().numpy()
-            scaled_overlay = cv2.resize(overlay, dsize=(real_image.shape[0], real_image.shape[1]))
+            scaled_overlay = cv2.resize(overlay, dsize=(real_image.shape[1], real_image.shape[0]))
+
         real_image = (real_image.astype(np.float32) * scaled_overlay[...,None]).astype(np.uint8)
     return real_image
 
@@ -251,7 +277,8 @@ def oracle_action(FLAGS, current_state, env_goal, env):
 
     distance_subgoal = distance_subgoal_constant if FLAGS.new_oracle else distance_subgoal_propotional
     pos = env.project_state_to_end_goal(env.sim, current_state)
-    goal = env_goal
+    pos = env._denormalize_end_goal_list(pos)
+    goal = env._denormalize_end_goal_list(env_goal)
 
     if env.name in ["ant_reacher.xml", "AntEmptyNegDistDict"]:
         if FLAGS.relative_subgoals:

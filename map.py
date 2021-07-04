@@ -1,6 +1,6 @@
 import numpy as np
 
-def generate_random_map(size=8, p=0.8, min_dist=3):
+def generate_random_map(size=8, p=0.8, min_dist=3, fence_symbol=1):
     """Generates a random valid map (one that has a path from start to goal)
 
     + is the endgoal
@@ -55,7 +55,7 @@ def generate_random_map(size=8, p=0.8, min_dist=3):
         'H' : 1,
     }
     # Put a wall around the maze and replace the symbols.
-    return [[1] * (size+2)] + [[1] + [replace_dict[item] for item in row] + [1] for row in res] + [[1] * (size+2)], valid[1]
+    return [[fence_symbol] * (size+2)] + [[fence_symbol] + [replace_dict[item] for item in row] + [fence_symbol] for row in res] + [[fence_symbol] * (size+2)], valid[1]
 
 if __name__ == "__main__":
     if False:

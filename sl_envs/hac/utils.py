@@ -1,5 +1,6 @@
+#import tensorflow as tf
+
 def layer(input_layer, num_next_neurons, is_output=False):
-    import tensorflow as tf
     num_prev_neurons = int(input_layer.shape[1])
     shape = [num_prev_neurons, num_next_neurons]
     
@@ -24,7 +25,6 @@ def layer(input_layer, num_next_neurons, is_output=False):
     return relu
 
 def layer_goal_nn(input_layer, num_next_neurons, is_output=False):
-    import tensorflow as tf
     num_prev_neurons = int(input_layer.shape[1])
     shape = [num_prev_neurons, num_next_neurons]
     

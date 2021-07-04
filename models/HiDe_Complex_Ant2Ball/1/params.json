@@ -4,7 +4,7 @@
     "num_Qs": 1,
     "oracle": false,
     "relative_subgoals": true,
-    "run_command": "initialize_HAC.py --retrain --variant AntWall --exp_name HiDe_Ant2Ball --num_Qs 1 --exp_num 1 --relative_subgoals --mask_global_info --vpn --featurize_image --vpn_double_conv --Q_penalize --vpn_masking --no_attention --covariance --vpn_dqn --torch --no_middle_level",
+    "run_command": "initialize_HAC.py --retrain --variant AntWall --exp_name HiDe_Complex_Ant --num_Qs 1 --exp_num -1 --relative_subgoals --mask_global_info --vpn --featurize_image --vpn_double_conv --Q_penalize --vpn_masking --no_attention --covariance --vpn_dqn",
     "run_id": "HiDe_Complex_Ant_1_2019-09-15T13-56-59",
     "target_networks": true,
     "variant": "AntWall"

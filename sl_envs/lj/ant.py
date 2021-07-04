@@ -20,7 +20,7 @@ import numpy as np
 import mujoco_py
 from gym import utils
 from gym.envs.mujoco import mujoco_env
-
+#from pyquaternion import Quaternion
 
 def q_inv(a):
   return [a[0], -a[1], -a[2], -a[3]]
@@ -46,7 +46,6 @@ class AntEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     self._expose_body_comvels = expose_body_comvels
     self._body_com_indices = {}
     self._body_comvel_indices = {}
-
     mujoco_env.MujocoEnv.__init__(self, file_path, 10)
     utils.EzPickle.__init__(self)
 
@@ -109,11 +108,19 @@ class AntEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         obs = np.concatenate([obs, comvel])
     return obs
 
+
+
+
   def reset_model(self):
     qpos = self.init_qpos + self.np_random.uniform(
         size=self.model.nq, low=-.1, high=.1)
     qvel = self.init_qvel + self.np_random.randn(self.model.nv) * .1
 
+    # init_orientation = self.np_random.uniform(size=1, low=0, high=2*np.pi)
+    # quat = Quaternion(axis=[0, 0, 1], angle=init_orientation)
+    # quat_new = np.array([quat[0],quat[1],quat[2],quat[3]])
+
+    #qpos[3:7] = quat_new
     # Set everything other than ant to original position and 0 velocity.
     qpos[15:] = self.init_qpos[15:]
     qvel[14:] = 0.
@@ -126,7 +133,7 @@ class AntEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     self.viewer.cam.lookat[2] = 0
     # self.viewer.cam.azimuth # Rotates the maze around z-axis
     # self.viewer.cam.elevation = -58  # For a view nicer for renderings
-    self.viewer.cam.elevation = -90  # For top down view
+    self.viewer.cam.elevation = -60  # For top down view
     # self.viewer.cam.distance = 20
     self.viewer.cam.distance = 40.46 # self.model.stat.extent * 1.19
     # print(self.viewer.cam.distance)

@@ -14,14 +14,17 @@
 # ==============================================================================
 
 from .ant_maze_env import AntMazeEnv
+from .point_maze_env import PointMazeEnv
 from .dm_point_maze_env import DMPointMazeEnv
+from .humanoid_maze_env import HumanoidMazeEnv
 
+#import tensorflow as tf
 # from tf_agents.environments import gym_wrapper
 # from tf_agents.environments import tf_py_environment
 
 
 # @gin.configurable
-def create_maze_env(env_name=None, top_down_view=False, eval_mode=False, hac_mode=False, extra_dims=False, maze_structure=None):
+def create_maze_env(env_name=None, top_down_view=False, eval_mode=False, hac_mode=False, extra_dims=False, seed=0, maze_structure=None):
   n_bins = 0
   manual_collision = False
   if env_name.startswith('Ego'):
@@ -31,10 +34,19 @@ def create_maze_env(env_name=None, top_down_view=False, eval_mode=False, hac_mod
     cls = AntMazeEnv
     env_name = env_name[3:]
     maze_size_scaling = 4
+  elif env_name.startswith('Point'):
+    cls = PointMazeEnv
+    manual_collision = True
+    env_name = env_name[5:]
+    maze_size_scaling = 4
   elif env_name.startswith('DMPoint'):
     cls = DMPointMazeEnv
     manual_collision = True
     env_name = env_name[7:]
+    maze_size_scaling = 4
+  elif env_name.startswith("Humanoid"):
+    cls = HumanoidMazeEnv
+    env_name = env_name[8:]
     maze_size_scaling = 4
   else:
     assert False, 'unknown env %s' % env_name
@@ -174,7 +186,7 @@ def create_maze_env(env_name=None, top_down_view=False, eval_mode=False, hac_mod
     random_goal = True
     reward_fn = 'negative_distance'
     assert maze_structure is not None
-  elif env_name in ['Wall', 'WallRandom', 'WallTestFlipped', 'WallTestBackwards', 'MazeExp', 'MazeExpTest']:
+  elif env_name in ['Wall', 'WallRandom', 'WallTestFlipped', 'WallTestBackwards', 'WallBig', 'WallBigger', 'WallBiggest', 'WallGiant', 'MazeExp', 'MazeExpTest']:
     maze_id = env_name
     random_goal = True
     reward_fn = 'negative_distance'
@@ -200,6 +212,7 @@ def create_maze_env(env_name=None, top_down_view=False, eval_mode=False, hac_mod
       'extra_dims': extra_dims,
       'key_gate_passage': key_gate_passage,
       'maze_structure': maze_structure,
+      'seed': seed
   }
   gym_env = cls(**gym_mujoco_kwargs)
   gym_env.reset()

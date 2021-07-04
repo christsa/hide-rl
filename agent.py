@@ -1,6 +1,5 @@
 import numpy as np
 from layer import Layer
-from oracle_layer import OracleLayer
 import pickle as cpickle
 import os, sys
 import pickle as cpickle
@@ -19,8 +18,22 @@ class Agent():
     def __init__(self,FLAGS, env, agent_params):
 
         self.FLAGS = FLAGS
-        import torch
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if self.FLAGS.torch:
+            import torch
+            import random
+            random.seed(self.FLAGS.seed)
+            torch.manual_seed(self.FLAGS.seed)
+            torch.cuda.manual_seed_all(self.FLAGS.seed)
+            torch.cuda.manual_seed(self.FLAGS.seed)
+            np.random.seed(self.FLAGS.seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            self.sess = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            import tensorflow as tf
+            config = tf.ConfigProto()
+            config.gpu_options.allow_growth=True
+            self.sess = tf.Session(config=config)
 
         # Set subgoal testing ratio each layer will use
         self.subgoal_test_perc = agent_params["subgoal_test_perc"]
@@ -30,10 +43,12 @@ class Agent():
             self.FLAGS.time_limit = 25
 
         # Create agent with number of levels specified by user
+        lowest_layer_class = NegDistLayer if self.FLAGS.negative_distance or FLAGS.dense_reward else Layer
         highest_layer_class = OracleLayer if self.FLAGS.oracle else Layer
-        self.layers = [Layer(0, FLAGS, env, self.device, agent_params)]
-        self.layers = self.layers + [Layer(i,FLAGS,env,self.device,agent_params) for i in range(1, FLAGS.layers-1)]
-        self.layers.append(highest_layer_class(FLAGS.layers-1, FLAGS, env, self.device, agent_params))
+        self.layers = [lowest_layer_class(0, FLAGS, env, self.sess, agent_params)]
+        self.layers = self.layers + [Layer(i,FLAGS,env,self.sess,agent_params) for i in range(1, FLAGS.layers-1)]
+        self.layers.append(highest_layer_class(FLAGS.layers-1, FLAGS, env, self.sess, agent_params))
+        self.radius_learner = RadiusLearner(self.sess, env, self.FLAGS, 1) if self.FLAGS.radius_learner else None
 
         # Below attributes will be used help save network parameters
         self.saver = None
@@ -63,8 +78,8 @@ class Agent():
 
         self.other_params = agent_params
 
-        self.end_goal_thresholds = torch.tensor(env.end_goal_thresholds, dtype=torch.float32, device=self.device)
-        self.subgoal_thresholds = torch.tensor(env.subgoal_thresholds, dtype=torch.float32, device=self.device)
+        self.end_goal_thresholds = torch.tensor(env.end_goal_thresholds, dtype=torch.float32, device=self.sess)
+        self.subgoal_thresholds = torch.tensor(env.subgoal_thresholds, dtype=torch.float32, device=self.sess)
 
 
     # Determine whether or not each layer's goal was achieved.  Also, if applicable, return the highest level whose goal was achieved.
@@ -122,12 +137,22 @@ class Agent():
             ''.format(d=divider, dtd=datetime_divider))
 
     def initialize_networks(self):
+        if not self.FLAGS.torch:
+            import tensorflow as tf
+            model_vars = tf.trainable_variables()
+            self.saver = tf.train.Saver(model_vars)
+            lower_policy_weights = tf.trainable_variables("critic_0_") + tf.trainable_variables("actor_0_")
+            self.saver_lower_policy = tf.train.Saver(lower_policy_weights)
+        # higher_policy_weights = (tf.trainable_variables("critic_1_") + tf.trainable_variables("actor_1_") +
+        #                         tf.trainable_variables("critic_2_") + tf.trainable_variables("actor_2_"))
+        # self.saver_higher_policy = tf.train.Saver(higher_policy_weights)
+
         # Set up directory for saving models
         self.model_dir = os.path.join(os.getcwd(), 'models', self.FLAGS.exp_name, str(self.FLAGS.exp_num))
         os.makedirs(self.model_dir, exist_ok=True)
         model_working_dir = os.path.join(os.getcwd(), 'models_working')
         model_negdist_dir = os.path.join(os.getcwd(), 'models_negative_distance')
-        self.model_loc = os.path.join(self.model_dir, 'HAC.pkl')
+        self.model_loc = self.model_dir + ('/HAC.pkl' if self.FLAGS.torch else '/HAC.ckpt')
         if not self.FLAGS.test:
             self.tb_writter = SummaryWriter(self.model_dir)
         self.performance_path = os.path.join(self.model_dir, "performance_log.txt")
@@ -143,9 +168,12 @@ class Agent():
             'subgoal_distances1', 'subgoal_distances2',
             'goal_subgoal_distance1', 'goal_subgoal_distance2',
             'lower_Q_val1', 'lower_Q_val2',
+            'radius_learner/mse_loss',
             'buffer/Q_val_lower_clipped1', 'buffer/Q_val_lower1', 'buffer/Q_val_lower_too_low1',
             'buffer/Q_val_lower_clipped2', 'buffer/Q_val_lower2', 'buffer/Q_val_lower_too_low2',
             'actor_0/loss', 'actor_1/loss','actor_2/loss', 
+            'bandit/q_loss', 'bandit/q_val','bandit/pi_loss', 'bandit/sigmas',
+            'bandit/rewards',
         ])})
         
         if self.FLAGS.retrain:
@@ -159,18 +187,42 @@ class Agent():
                     'target_networks': not self.FLAGS.no_target_net, 
                     'num_Qs': self.FLAGS.num_Qs, 
                     'exp_name': self.FLAGS.exp_name,
-                    'exp_num': self.FLAGS.exp_num,
-                    'oracle': self.FLAGS.oracle, 
+                    'exp_num': self.FLAGS.exp_num, 
+                    'negative_distance': self.FLAGS.negative_distance,
+                    'bayes': self.FLAGS.bayes,
+                    'oracle': self.FLAGS.oracle,
                     'variant': self.FLAGS.variant,
+                    'actor_grads': self.FLAGS.actor_grads,
+                    'orig_trans': self.FLAGS.orig_trans,
                     'relative_subgoals': self.FLAGS.relative_subgoals,
+                    'sl_oracle': self.FLAGS.sl_oracle,
+                    'semi_oracle': self.FLAGS.semi_oracle,
+                    'radius_learner': self.FLAGS.radius_learner,
+                    'priority_replay': self.FLAGS.priority_replay,
                 }, f, indent=4, sort_keys=True)
 
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
 
+         # Initialize actor/critic networks
+        if not self.FLAGS.torch:
+            import tensorflow as tf
+            self.sess.run(tf.global_variables_initializer())
+            if self.FLAGS.td3:
+                for layer in self.layers:
+                    if hasattr(layer, 'actor') and hasattr(layer.actor, 'update_target_weights_init'):
+                        print("Copying init weights for", layer.actor.actor_name)
+                        self.sess.run(layer.actor.update_target_weights_init)
+                    if hasattr(layer, 'critic') and hasattr(layer.critic, 'update_target_weights_init'):
+                        print("Copying init weights for", layer.critic.critic_name)
+                        self.sess.run(layer.critic.update_target_weights_init)
+
         # If not retraining, restore weights
         # if we are not retraining from scratch, just restore weights
         if self.FLAGS.retrain == False:
+            # self.saver_higher_policy.restore(self.sess, tf.train.latest_checkpoint(model_working_dir))
+            # self.saver_lower_policy.restore(self.sess, tf.train.latest_checkpoint(model_working_dir))
+            # self.saver.restore(self.sess, tf.train.latest_checkpoint(model_negdist_dir))
             with open(os.path.join(self.model_dir, "params.json"), 'r') as f:
                 variant = json.load(f)
             flag_dict = vars(self.FLAGS)
@@ -180,7 +232,12 @@ class Agent():
                 assert variant[variant_key] == flag_dict[variant_key], (variant_key, variant[variant_key, flag_dict[variant_key]])
             assert variant['target_networks'] == (not flag_dict['no_target_net'])
             print(self.model_dir)
-            self.load_state_dict(torch.load(self.model_loc, self.device))
+            if self.FLAGS.torch:
+                import torch
+                self.load_state_dict(torch.load(self.model_loc, self.sess))
+            else:
+                import tensorflow as tf
+                self.saver.restore(self.sess, tf.train.latest_checkpoint(self.model_dir))
 
     def state_dict(self):
         result = {}
@@ -189,6 +246,8 @@ class Agent():
                 result['layer_%d_actor' % i] = layer.actor.state_dict()
             if hasattr(layer, 'critic'):
                 result['layer_%d_critic' % i] = layer.critic.state_dict()
+        if self.radius_learner is not None:
+            result['radius_learner'] = self.radius_learner.state_dict()
         return result
     
     def load_state_dict(self, state_dict):
@@ -198,13 +257,19 @@ class Agent():
                 layer.actor.load_state_dict(state_dict['layer_%d_actor' % i])
             if hasattr(layer, 'critic'):
                 layer.critic.load_state_dict(state_dict['layer_%d_critic' % i])
+        if self.radius_learner is not None:
+            self.radius_learner.load_state_dict(state_dict['radius_learner'])
 
     # Save neural network parameters
     def save_model(self, episode, success_rate = None):
-        if success_rate is not None and success_rate >= 0:
-            extra_location = '{}/HAC_{}_{}.pkl'.format(self.model_dir, episode, int(success_rate))
-            torch.save(self.state_dict(), extra_location)
-        torch.save(self.state_dict(), self.model_loc)
+        if self.FLAGS.torch:
+            import torch
+            if success_rate is not None and success_rate >= 0:
+                extra_location = '{}/HAC_{}_{}.pkl'.format(self.model_dir, episode, int(success_rate))
+                torch.save(self.state_dict(), extra_location)
+            torch.save(self.state_dict(), self.model_loc)
+        else:
+            self.saver.save(self.sess, self.model_loc, global_step=episode)
 
     # Update actor and critic networks for each layer
     def learn(self, env, metrics):
@@ -218,21 +283,24 @@ class Agent():
             metrics['test/success_rate'] = self.performance_log[-1]
 
     # Train agent for an episode
-    def train(self, env, episode_num):
+    def train(self, env, episode_num, batch):
         metrics = {}
         epoch_start = time.time()
         # Select initial state from in initial state space, defined in environment.py
-        self.current_state = torch.tensor(env.reset_sim(self.goal_array[self.FLAGS.layers - 1]), device=self.device, dtype=torch.float32)
+        self.current_state = torch.tensor(env.reset_sim(self.goal_array[self.FLAGS.layers - 1]), device=self.sess, dtype=torch.float32)
         if "ant" in env.name.lower():
-            print("Initial Ant Position: ", self.current_state[:3])
+            print("Initial Ant Position: ", self.current_state[:2])
         # print("Initial State: ", self.current_state)
 
         if self.FLAGS.save_video:
             self.image_path = [env.crop_raw(env.render(mode='rgb_array'))]
 
         # Select final goal from final goal space, defined in "design_agent_and_env.py"
-        self.goal_array[self.FLAGS.layers - 1] = torch.tensor(env.get_next_goal(self.FLAGS.test), dtype=torch.float32, device=self.device)
-        print("Next End Goal: ", self.goal_array[self.FLAGS.layers - 1])
+        self.goal_array[self.FLAGS.layers - 1] = torch.tensor(env.get_next_goal(self.FLAGS.test), dtype=torch.float32, device=self.sess)
+        print("Next End Goal absolute: ", self.goal_array[self.FLAGS.layers - 1])
+        #if self.FLAGS.relative_subgoals:
+        #    self.goal_array[self.FLAGS.layers - 1] -=  project_state(env, self.FLAGS, 0, self.current_state)
+        #print("Next End Goal relative: ", self.goal_array[self.FLAGS.layers - 1])
 
         # Reset step counter
         self.steps_taken = 0
@@ -247,6 +315,10 @@ class Agent():
             for key, values in self.layers[i_layer].agg_metrics.items():
                 metrics[key+str(i_layer)] = np.mean(values)
             self.layers[i_layer].agg_metrics = defaultdict(list)
+        if self.FLAGS.vpn and self.FLAGS.learn_sigma:
+            for key, values in self.layers[-1].actor.bandit.agg_metrics.items():
+                metrics[key] = np.mean(values)
+            self.layers[-1].actor.bandit.agg_metrics = defaultdict(list)
 
         metrics['sample_time'] = sample_end - epoch_start
 
