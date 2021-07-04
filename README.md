@@ -1,6 +1,6 @@
 #  Hierarchical Decompositional Reinforcement Learning (HiDe)
 This repository contains the code to implement the *Learning Functionally Decomposed Hierarchies for Continuous Navigation Tasks (HiDe)* algorithm. 
-The paper is available at [IEEE RA-L](https://ieeexplore.ieee.org/document/9357915))
+The paper is available at [IEEE RA-L](https://ieeexplore.ieee.org/document/9357915)
 
 We are happy to answer any questions. Feel free to file an issue.
 
@@ -143,7 +143,6 @@ python initialize_HAC.py --retrain --variant AntWall --exp_name HiDe_complex_Ant
 python initialize_HAC.py --retrain --variant DMPointWall --exp_name HiDe_complex_Ant_new --num_Qs 1 --exp_num 1 --relative_subgoals --mask_global_info --vpn --featurize_image --vpn_double_conv --Q_penalize --vpn_masking --no_attention --covariance --vpn_dqn --high_penalty --no_middle_level --torch --show
 ```
 
-We found out that we get better generalization results when trained with `--high_penalty` flag.
 
 #### Experiment 3 - Transfer of agents:
 We provide the pretrained models both for Ant and Ball. Both were trained using RelHAC without the planning layer. 
